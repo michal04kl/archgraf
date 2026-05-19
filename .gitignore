@@ -1,0 +1,32 @@
+# ── Katalog budowania (cmake + mingw32-make output) ────────────────────
+build/
+
+# ── Pliki wykonywalne i debug (poza build/) ────────────────────────────
+*.exe
+*.pdb
+*.ilk
+
+# ── Pliki obiektów (poza build/) ───────────────────────────────────────
+*.o
+*.obj
+
+# ── ImGui runtime config (generowany przy każdym uruchomieniu) ──────────
+imgui.ini
+
+# ── VS Code — odkomentuj jeśli nie chcesz commitować ustawień edytora ──
+# .vscode/
+
+# ── System operacyjny ──────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ── Python cache ───────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+
+# ── Logi i pliki tymczasowe ────────────────────────────────────────────
+*.log
+*.tmp
+*.bak
