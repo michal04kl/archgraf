@@ -18,39 +18,40 @@ struct PanelResult {
     bool  hasNextPoint=false;
 
     // IW
-    bool  iwBeginSelectOrigin=false;
-    bool  iwCancel=false;
-    bool  iwPlacePoint=false;
-    bool  iwCreateWalls=false;
-    bool  iwUndo=false;
-    float iw_moveX=0,iw_moveZ=0;
-    float iw_moveAlong=0;
-    float iw_thickness=0.15f;
-    float iw_height=0.0f;
+    bool  iwBeginSelectOrigin=false,iwCancel=false,iwPlacePoint=false;
+    bool  iwCreateWalls=false,iwUndo=false;
+    float iw_moveX=0,iw_moveZ=0,iw_moveAlong=0;
+    float iw_thickness=0.15f,iw_height=0.0f;
     int   deleteInnerWall=-1;
 
     // Drzwi
     bool  placeDoor=false,placePassage=false;
-    int   door_wallIdx=0;
-    bool  door_isInner=false;
+    int   door_wallIdx=0; bool door_isInner=false;
     float door_offset=0.5f,door_width=0.9f,door_height=2.1f;
     bool  door_swing=true,door_openLeft=true,door_isPassage=false;
     int   deleteDoor=-1;
 
     // Okno
     bool  placeWindow=false;
-    int   win_wallIdx=0;
-    bool  win_isInner=false;
+    int   win_wallIdx=0; bool win_isInner=false;
     float win_offset=0.1f,win_width=0.8f,win_height=1.0f,win_sill=0.9f;
     int   deleteWindow=-1;
 
-    // Meble
-    bool        startFurniturePlacement=false;  // wejdz w tryb stawiania
-    bool        cancelFurniturePlacement=false;
-    int         furnitureModelIdx=0;   // indeks w availableModels
-    float       furnitureRotY=0.0f;
-    float       furnitureScale=1.0f;
-    int         deleteFurniture=-1;
+    // Meble OBJ
+    bool  startFurniturePlacement=false,cancelFurniturePlacement=false;
+    int   furnitureModelIdx=0;
+    float furnitureRotY=0.0f,furnitureScale=1.0f;
+    int   deleteFurniture=-1;
+
+    // Meble wbudowane
+    bool  startBuiltinPlacement=false;
+    int   builtinFurnitureType=0;
+    float builtinRotY=0.0f,builtinScale=1.0f;
+
+    // Selekcja i edycja mebli (Faza 5)
+    int   clickedFurnitureIdx  = -2;   // -2=brak klikniecia, -1=odznacz, >=0=zaznacz
+    bool  requestMoveFurniture = false; // wejdz w tryb przesuwania
+    float newFurnitureRotY     = -999.f; // -999=brak zmiany
 };
 
 enum class IWState { IDLE, SELECT_ORIGIN, PLACING };
@@ -73,22 +74,20 @@ public:
     enum class DesignTool { NONE, INNER_WALL, DOOR, WINDOW, FURNITURE };
     DesignTool activeTool=DesignTool::NONE;
 
-    // IW
     float iw_thickness=0.15f,iw_height=0.0f,iw_moveAmount=1.0f;
 
-    // Drzwi
     int   door_wallIdx=0; bool door_isInner=false;
     float door_offset=0.5f,door_width=0.9f,door_height=2.1f;
     bool  door_swing=true,door_openLeft=true,door_isPassage=false;
 
-    // Okno
     int   win_wallIdx=0; bool win_isInner=false;
     float win_offset=0.1f,win_width=0.8f,win_height=1.0f,win_sill=0.9f;
 
-    // Meble
-    int   furniture_modelIdx  = 0;
-    float furniture_rotY      = 0.0f;
-    float furniture_scale     = 1.0f;
+    int   furniture_modelIdx=0;
+    float furniture_rotY=0.0f,furniture_scale=1.0f;
+
+    int   builtin_typeIdx=0;
+    float builtin_rotY=0.0f,builtin_scale=1.0f;
 
     PanelResult render(
         const Outline& outline,
@@ -102,10 +101,14 @@ public:
         int iwOnWallIdx,
         float iwOnWallLen,
         const IWMoveFlags& moveFlags,
-        // Meble
         const std::vector<std::string>& availableModels,
-        int numFurnitureItems,
-        bool furniturePlacementMode);
+        const std::vector<std::string>& furnitureLabels,  // NOWE
+        int selectedFurnitureIdx,                          // NOWE
+        glm::vec3 selectedFurniturePos,                    // NOWE
+        float selectedFurnitureRotY,                       // NOWE
+        bool furniturePlacementMode,
+        bool builtinPlacementMode,
+        bool furnitureMoveMode);                           // NOWE
 
     glm::vec2 computeNextPoint(const Outline& outline) const;
     float     getAbsoluteAngle(const Outline& outline) const;

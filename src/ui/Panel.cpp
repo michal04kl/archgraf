@@ -1,10 +1,12 @@
 #include "Panel.h"
+#include "scene/FurnitureLibrary.h"
 #include <imgui.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
+#include <cstring>
 
 float Panel::getAbsoluteAngle(const Outline& outline) const
 {
@@ -32,8 +34,7 @@ static void wallCombo(const char* id,
     int nIn=(int)innerLens.size();
     char curLbl[64];
     if(!isInner)
-        snprintf(curLbl,sizeof(curLbl),"Obrys %d (%.1fm)",
-            wallIdx,outline.edgeLength(wallIdx));
+        snprintf(curLbl,sizeof(curLbl),"Obrys %d (%.1fm)",wallIdx,outline.edgeLength(wallIdx));
     else {
         float l=(wallIdx<nIn)?innerLens[wallIdx]:0.f;
         snprintf(curLbl,sizeof(curLbl),"Wewn. %d (%.1fm)",wallIdx,l);
@@ -41,19 +42,14 @@ static void wallCombo(const char* id,
     ImGui::SetNextItemWidth(-1);
     if(ImGui::BeginCombo(id,curLbl)){
         for(int i=0;i<nOut;++i){
-            char buf[64];
-            snprintf(buf,sizeof(buf),"Obrys %d (%.1fm)",i,outline.edgeLength(i));
+            char buf[64]; snprintf(buf,sizeof(buf),"Obrys %d (%.1fm)",i,outline.edgeLength(i));
             bool sel=(!isInner&&wallIdx==i);
             if(ImGui::Selectable(buf,sel)){isInner=false;wallIdx=i;}
             if(sel) ImGui::SetItemDefaultFocus();
         }
-        if(nIn>0){
-            ImGui::Separator();
-            ImGui::TextDisabled("  -- Sciany wewnetrzne --");
-        }
+        if(nIn>0){ImGui::Separator();ImGui::TextDisabled("  -- Sciany wewnetrzne --");}
         for(int i=0;i<nIn;++i){
-            char buf[64];
-            snprintf(buf,sizeof(buf),"Wewn. %d (%.1fm)",i,innerLens[i]);
+            char buf[64]; snprintf(buf,sizeof(buf),"Wewn. %d (%.1fm)",i,innerLens[i]);
             bool sel=(isInner&&wallIdx==i);
             if(ImGui::Selectable(buf,sel)){isInner=true;wallIdx=i;}
             if(sel) ImGui::SetItemDefaultFocus();
@@ -107,8 +103,13 @@ PanelResult Panel::render(
     float iwOnWallLen,
     const IWMoveFlags& moveFlags,
     const std::vector<std::string>& availableModels,
-    int numFurnitureItems,
-    bool furniturePlacementMode)
+    const std::vector<std::string>& furnitureLabels,
+    int selectedFurnitureIdx,
+    glm::vec3 selectedFurniturePos,
+    float selectedFurnitureRotY,
+    bool furniturePlacementMode,
+    bool builtinPlacementMode,
+    bool furnitureMoveMode)
 {
     PanelResult result;
     result.floorSize=floorSize;
@@ -124,6 +125,13 @@ PanelResult Panel::render(
     result.furnitureModelIdx=furniture_modelIdx;
     result.furnitureRotY=furniture_rotY;
     result.furnitureScale=furniture_scale;
+    result.startBuiltinPlacement=false;
+    result.builtinFurnitureType=builtin_typeIdx;
+    result.builtinRotY=builtin_rotY;
+    result.builtinScale=builtin_scale;
+    result.clickedFurnitureIdx  = -2;
+    result.requestMoveFurniture = false;
+    result.newFurnitureRotY     = -999.f;
 
     if(cameraMode!=CameraMode::TOP_DOWN){
         ImGui::SetNextWindowPos({10,10},ImGuiCond_Always);
@@ -240,13 +248,11 @@ PanelResult Panel::render(
         int nEdges=(int)outline.points.size();
         doorWallIndex=glm::clamp(doorWallIndex,0,nEdges-1);
         char lbl[64];
-        snprintf(lbl,sizeof(lbl),"Sciana %d (%.1fm)",
-            doorWallIndex,outline.edgeLength(doorWallIndex));
+        snprintf(lbl,sizeof(lbl),"Sciana %d (%.1fm)",doorWallIndex,outline.edgeLength(doorWallIndex));
         ImGui::SetNextItemWidth(-1);
         if(ImGui::BeginCombo("##door",lbl)){
             for(int i=0;i<nEdges;++i){
-                char buf[64];
-                snprintf(buf,sizeof(buf),"Sciana %d (%.1fm)",i,outline.edgeLength(i));
+                char buf[64]; snprintf(buf,sizeof(buf),"Sciana %d (%.1fm)",i,outline.edgeLength(i));
                 bool sel=(doorWallIndex==i);
                 if(ImGui::Selectable(buf,sel)) doorWallIndex=i;
                 if(sel) ImGui::SetItemDefaultFocus();
@@ -268,7 +274,6 @@ PanelResult Panel::render(
     // ═════ DESIGN_MODE ═══════════════════════════════════════════════
     else if(state==AppState::DESIGN_MODE){
 
-        // ── IW aktywne: PRZED tabbar ──────────────────────────────────
         if(iwState==IWState::SELECT_ORIGIN||iwState==IWState::PLACING){
             if(iwState==IWState::SELECT_ORIGIN){
                 ImGui::Separator();
@@ -283,11 +288,9 @@ PanelResult Panel::render(
                 ImGui::Separator();
                 ImGui::TextColored({0.2f,1.0f,0.4f,1.0f},">> Krok 2: Ustaw punkty sciany");
                 ImGui::Text("Punktow: %d (min 2)",iwPointsCount);
-                ImGui::TextColored({0.3f,0.9f,1.0f,1.0f},
-                    "Kursor: (%.2f, %.2f)",iwCursorPos.x,iwCursorPos.y);
+                ImGui::TextColored({0.3f,0.9f,1.0f,1.0f},"Kursor: (%.2f, %.2f)",iwCursorPos.x,iwCursorPos.y);
                 if(moveFlags.onWall&&moveFlags.wallIdx>=0)
-                    ImGui::TextColored({1.0f,0.85f,0.2f,1.0f},
-                        "Na scianie outlinu #%d (%.2fm)",moveFlags.wallIdx,iwOnWallLen);
+                    ImGui::TextColored({1.0f,0.85f,0.2f,1.0f},"Na scianie outlinu #%d (%.2fm)",moveFlags.wallIdx,iwOnWallLen);
                 else ImGui::TextDisabled("Wewnatrz outlinu");
                 ImGui::Separator();
 
@@ -299,26 +302,19 @@ PanelResult Panel::render(
 
                 float bw=80.0f,sp=4.0f;
                 ImGui::TextDisabled("Ruch w przestrzeni XZ:");
-
                 ImGui::Dummy(ImVec2(bw,28));ImGui::SameLine(0,sp);
                 if(dirButton("Gora##G",moveFlags.canUp,bw)) result.iw_moveZ=-iw_moveAmount;
-
                 if(dirButton("Lewo##L",moveFlags.canLeft,bw)) result.iw_moveX=-iw_moveAmount;
                 ImGui::SameLine(0,sp);
                 {
                     bool any=moveFlags.canLeft||moveFlags.canRight||moveFlags.canUp||moveFlags.canDown;
-                    ImGui::PushStyleColor(ImGuiCol_Button,
-                        any?ImVec4(0.1f,0.1f,0.1f,1.f):ImVec4(0.5f,0.1f,0.1f,1.f));
-                    ImGui::PushStyleColor(ImGuiCol_Text,
-                        any?ImVec4(0.5f,0.5f,0.5f,1.f):ImVec4(1.f,0.3f,0.3f,1.f));
+                    ImGui::PushStyleColor(ImGuiCol_Button,any?ImVec4(0.1f,0.1f,0.1f,1.f):ImVec4(0.5f,0.1f,0.1f,1.f));
+                    ImGui::PushStyleColor(ImGuiCol_Text,any?ImVec4(0.5f,0.5f,0.5f,1.f):ImVec4(1.f,0.3f,0.3f,1.f));
                     ImGui::Button(any?"##cx":"!!##cx",ImVec2(bw,28));
                     ImGui::PopStyleColor(2);
-                    if(!any&&ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Zablokowany! Uzyj 'Wzdluz'");
                 }
                 ImGui::SameLine(0,sp);
                 if(dirButton("Prawo##R",moveFlags.canRight,bw)) result.iw_moveX=+iw_moveAmount;
-
                 ImGui::Dummy(ImVec2(bw,28));ImGui::SameLine(0,sp);
                 if(dirButton("Dol##D",moveFlags.canDown,bw)) result.iw_moveZ=+iw_moveAmount;
 
@@ -326,36 +322,29 @@ PanelResult Panel::render(
                 if(moveFlags.onWall){
                     ImGui::TextDisabled("Wzdluz sciany #%d:",moveFlags.wallIdx);
                     float bw2=(ImGui::GetContentRegionAvail().x-4.0f)*0.5f;
-                    if(alongButton("<< Lewo##WL",moveFlags.canAlongLeft,bw2))
-                        result.iw_moveAlong=-iw_moveAmount;
+                    if(alongButton("<< Lewo##WL",moveFlags.canAlongLeft,bw2)) result.iw_moveAlong=-iw_moveAmount;
                     ImGui::SameLine(0,4);
-                    if(alongButton("Prawo >>##WP",moveFlags.canAlongRight,bw2))
-                        result.iw_moveAlong=+iw_moveAmount;
+                    if(alongButton("Prawo >>##WP",moveFlags.canAlongRight,bw2)) result.iw_moveAlong=+iw_moveAmount;
                 } else {
                     ImGui::TextDisabled("Wzdluz: dostepne gdy kursor NA scianie");
                 }
 
                 ImGui::Spacing();ImGui::Separator();ImGui::Spacing();
-
                 ImGui::PushStyleColor(ImGuiCol_Button,{0.1f,0.55f,0.1f,1.0f});
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,{0.2f,0.75f,0.2f,1.0f});
                 if(ImGui::Button("Postaw punkt  (ENTER)",ImVec2(-1,0))) result.iwPlacePoint=true;
                 ImGui::PopStyleColor(2);
-
                 ImGui::BeginDisabled(iwPointsCount==0);
                 if(ImGui::Button("Cofnij punkt  (Z)",ImVec2(-1,0))) result.iwUndo=true;
                 ImGui::EndDisabled();
                 ImGui::Spacing();
-
                 ImGui::BeginDisabled(iwPointsCount<2);
                 ImGui::PushStyleColor(ImGuiCol_Button,{0.55f,0.25f,0.05f,1.0f});
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,{0.75f,0.35f,0.1f,1.0f});
                 if(ImGui::Button("Stworz sciane!  (SPACJA)",ImVec2(-1,0))) result.iwCreateWalls=true;
                 ImGui::PopStyleColor(2);
                 ImGui::EndDisabled();
-                if(iwPointsCount<2)
-                    ImGui::TextColored({0.8f,0.4f,0.4f,1.0f},"  wymagane min 2 punkty");
-
+                if(iwPointsCount<2) ImGui::TextColored({0.8f,0.4f,0.4f,1.0f},"  wymagane min 2 punkty");
                 ImGui::Spacing();ImGui::Separator();ImGui::Spacing();
                 ImGui::PushStyleColor(ImGuiCol_Button,{0.7f,0.15f,0.15f,1.0f});
                 if(ImGui::Button("Anuluj  (ESC)",ImVec2(-1,0))) result.iwCancel=true;
@@ -368,11 +357,9 @@ PanelResult Panel::render(
             return result;
         }
 
-        // ── Normalny tryb ─────────────────────────────────────────────
         ImGui::TextColored({0.4f,1.0f,0.4f,1.0f},"TRYB PROJEKTOWANIA");
         ImGui::Separator();
-        ImGui::Text("Sciany: %d | Wys: %.1fm",
-            (int)outline.points.size(),apartmentHeight);
+        ImGui::Text("Sciany: %d | Wys: %.1fm",(int)outline.points.size(),apartmentHeight);
         ImGui::Spacing();
 
         activeTool=DesignTool::NONE;
@@ -398,10 +385,7 @@ PanelResult Panel::render(
                     result.iwBeginSelectOrigin=true;
                 ImGui::PopStyleColor();
                 ImGui::Spacing();
-                ImGui::TextWrapped("1. Kliknij punkt startowy\n"
-                    "2. Przesuwaj kursor (szare=zablokowane)\n"
-                    "3. Postaw min 2 punkty\n"
-                    "4. Stworz sciane");
+                ImGui::TextWrapped("1. Kliknij punkt startowy\n2. Przesuwaj kursor\n3. Postaw min 2 punkty\n4. Stworz sciane");
                 if(numInnerWalls>0){
                     ImGui::Spacing();ImGui::Separator();
                     ImGui::TextDisabled("Sciany wewnetrzne (%d):",numInnerWalls);
@@ -424,16 +408,11 @@ PanelResult Panel::render(
                 activeTool=DesignTool::DOOR;
                 ImGui::Spacing();
                 ImGui::Text("Sciana:");
-                {
-                    int maxD=door_isInner?(int)innerWallLengths.size()-1
-                                        :(int)outline.points.size()-1;
-                    door_wallIdx=glm::clamp(door_wallIdx,0,glm::max(maxD,0));
-                }
+                {int maxD=door_isInner?(int)innerWallLengths.size()-1:(int)outline.points.size()-1;
+                 door_wallIdx=glm::clamp(door_wallIdx,0,glm::max(maxD,0));}
                 wallCombo("##dwall",door_isInner,door_wallIdx,outline,innerWallLengths);
                 ImGui::Spacing();
-                float wl=door_isInner
-                    ?(door_wallIdx<(int)innerWallLengths.size()?innerWallLengths[door_wallIdx]:0.f)
-                    :outline.edgeLength(door_wallIdx);
+                float wl=door_isInner?(door_wallIdx<(int)innerWallLengths.size()?innerWallLengths[door_wallIdx]:0.f):outline.edgeLength(door_wallIdx);
                 ImGui::TextDisabled("Dlugosc sciany: %.2fm",wl);
                 ImGui::Text("Przesuniecie od startu (m):");
                 ImGui::SetNextItemWidth(-1);
@@ -468,8 +447,7 @@ PanelResult Panel::render(
                 ImGui::Spacing();
                 bool valid=(door_offset+door_width)<=wl;
                 if(!valid) ImGui::TextColored({1,0.3f,0.3f,1},"! Wykracza (%.2fm)!",wl);
-                if(valid) ImGui::TextColored({1.0f,0.85f,0.3f,1.0f},
-                    "Pozycja: %.2f-%.2fm",door_offset,door_offset+door_width);
+                if(valid) ImGui::TextColored({1.0f,0.85f,0.3f,1.0f},"Pozycja: %.2f-%.2fm",door_offset,door_offset+door_width);
                 ImGui::BeginDisabled(!valid);
                 ImGui::PushStyleColor(ImGuiCol_Button,{0.2f,0.4f,0.8f,1.0f});
                 if(ImGui::Button("Dodaj",ImVec2(-1,0))){
@@ -508,16 +486,11 @@ PanelResult Panel::render(
                 activeTool=DesignTool::WINDOW;
                 ImGui::Spacing();
                 ImGui::Text("Sciana:");
-                {
-                    int maxW=win_isInner?(int)innerWallLengths.size()-1
-                                       :(int)outline.points.size()-1;
-                    win_wallIdx=glm::clamp(win_wallIdx,0,glm::max(maxW,0));
-                }
+                {int maxW=win_isInner?(int)innerWallLengths.size()-1:(int)outline.points.size()-1;
+                 win_wallIdx=glm::clamp(win_wallIdx,0,glm::max(maxW,0));}
                 wallCombo("##wwall",win_isInner,win_wallIdx,outline,innerWallLengths);
                 ImGui::Spacing();
-                float wl=win_isInner
-                    ?(win_wallIdx<(int)innerWallLengths.size()?innerWallLengths[win_wallIdx]:0.f)
-                    :outline.edgeLength(win_wallIdx);
+                float wl=win_isInner?(win_wallIdx<(int)innerWallLengths.size()?innerWallLengths[win_wallIdx]:0.f):outline.edgeLength(win_wallIdx);
                 ImGui::TextDisabled("Dlugosc sciany: %.2fm",wl);
                 ImGui::Text("Przesuniecie od startu (m):");
                 ImGui::SetNextItemWidth(-1);
@@ -539,9 +512,7 @@ PanelResult Panel::render(
                 ImGui::Spacing();
                 bool valid=(win_offset+win_width)<=wl;
                 if(!valid) ImGui::TextColored({1,0.3f,0.3f,1},"! Wykracza (%.2fm)!",wl);
-                if(valid) ImGui::TextColored({0.3f,0.9f,1.0f,1.0f},
-                    "Pozycja: %.2f-%.2fm, parapet %.2fm",
-                    win_offset,win_offset+win_width,win_sill);
+                if(valid) ImGui::TextColored({0.3f,0.9f,1.0f,1.0f},"Pozycja: %.2f-%.2fm, parapet %.2fm",win_offset,win_offset+win_width,win_sill);
                 ImGui::BeginDisabled(!valid);
                 ImGui::PushStyleColor(ImGuiCol_Button,{0.2f,0.55f,0.7f,1.0f});
                 if(ImGui::Button("Dodaj okno",ImVec2(-1,0))){
@@ -572,86 +543,156 @@ PanelResult Panel::render(
                 ImGui::EndTabItem();
             }
 
-            // ── TAB: Meble ────────────────────────────────────────────
-            if(ImGui::BeginTabItem("Meble")){
-                activeTool=DesignTool::FURNITURE;
-                ImGui::Spacing();
+            // ── TAB: Meble ────────────────────────────────────────────────────
+if(ImGui::BeginTabItem("Meble")){
+    activeTool=DesignTool::FURNITURE;
+    ImGui::Spacing();
 
-                if(availableModels.empty()){
-                    ImGui::TextColored({1.0f,0.6f,0.2f,1.0f},"Brak modeli OBJ!");
-                    ImGui::TextWrapped(
-                        "Umiec pliki .obj w:\n"
-                        "  assets/models/\n\n"
-                        "Opcjonalne tekstury (.png/.jpg):\n"
-                        "  assets/textures/\n"
-                        "  (ta sama nazwa co model)");
-                } else {
-                    ImGui::TextDisabled("Dostepne modele (%d):",(int)availableModels.size());
-                    furniture_modelIdx=glm::clamp(furniture_modelIdx,0,
-                        (int)availableModels.size()-1);
+    // ─── BIBLIOTEKA WBUDOWANA ─────────────────────────────────────
+    ImGui::TextColored({0.4f,1.0f,0.8f,1.0f},"Meble wbudowane:");
+    ImGui::Spacing();
 
-                    // Lista modeli
-                    float listH=glm::min((int)availableModels.size()*22+6,110);
-                    ImGui::BeginChild("##modlist",{-1,(float)listH},true);
-                    for(int i=0;i<(int)availableModels.size();++i){
-                        bool sel=(furniture_modelIdx==i);
-                        if(ImGui::Selectable(availableModels[i].c_str(),sel))
-                            furniture_modelIdx=i;
-                    }
-                    ImGui::EndChild();
-                    ImGui::Spacing();
-
-                    // Parametry
-                    ImGui::Text("Obrot Y (deg):");
-                    ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##frotY",&furniture_rotY,-180.0f,180.0f,"%.0f");
-
-                    ImGui::Text("Skala:");
-                    ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##fscale",&furniture_scale,0.05f,5.0f,"%.2f");
-                    ImGui::Spacing();
-
-                    if(!furniturePlacementMode){
-                        ImGui::PushStyleColor(ImGuiCol_Button,{0.2f,0.55f,0.2f,1.0f});
-                        if(ImGui::Button("Postaw mebel  (kliknij w widoku)",ImVec2(-1,0))){
-                            result.startFurniturePlacement=true;
-                            result.furnitureModelIdx=furniture_modelIdx;
-                            result.furnitureRotY=furniture_rotY;
-                            result.furnitureScale=furniture_scale;
-                        }
-                        ImGui::PopStyleColor();
-                        ImGui::TextDisabled("Kliknij powyzej, potem LPM w widoku");
-                    } else {
-                        ImGui::TextColored({0.2f,1.0f,0.4f,1.0f},
-                            ">> Kliknij LPM aby umiescic");
-                        ImGui::TextColored({0.2f,1.0f,0.4f,1.0f},
-                            "   Model: %s",availableModels[furniture_modelIdx].c_str());
-                        ImGui::Spacing();
-                        ImGui::PushStyleColor(ImGuiCol_Button,{0.7f,0.15f,0.15f,1.0f});
-                        if(ImGui::Button("Anuluj  (ESC)",ImVec2(-1,0)))
-                            result.cancelFurniturePlacement=true;
-                        ImGui::PopStyleColor();
-                    }
-                }
-
-                // Lista postawionych mebli
-                if(numFurnitureItems>0){
-                    ImGui::Spacing();ImGui::Separator();
-                    ImGui::TextDisabled("Postawione meble (%d):",numFurnitureItems);
-                    float lh=(float)std::min(numFurnitureItems*22+6,90);
-                    ImGui::BeginChild("##flist",{0,lh},true);
-                    for(int i=0;i<numFurnitureItems;++i){
-                        ImGui::Text("Mebel #%d",i);ImGui::SameLine();
-                        char btn[24];snprintf(btn,sizeof(btn),"X##f%d",i);
-                        ImGui::PushStyleColor(ImGuiCol_Button,{0.7f,0.15f,0.15f,1.0f});
-                        if(ImGui::SmallButton(btn)) result.deleteFurniture=i;
-                        ImGui::PopStyleColor();
-                    }
-                    ImGui::EndChild();
-                }
-
-                ImGui::EndTabItem();
+    static const char* cats[]={"Salon / Jadalnia","Sypialnia","Kuchnia","Lazienka"};
+    for(const char* cat:cats){
+        if(ImGui::CollapsingHeader(cat)){
+            ImGui::Indent(8.0f);
+            for(int i=0;i<(int)FurnitureType::COUNT;++i){
+                FurnitureType ft=(FurnitureType)i;
+                if(strcmp(furnitureCategory(ft),cat)!=0) continue;
+                bool sel=(builtin_typeIdx==i);
+                if(ImGui::Selectable(furnitureName(ft),sel))
+                    builtin_typeIdx=i;
             }
+            ImGui::Unindent(8.0f);
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::Text("Obrot Y:"); ImGui::SameLine();
+    ImGui::SetNextItemWidth(120);
+    ImGui::SliderFloat("##brotY",&builtin_rotY,0,360,"%.0f deg");
+    ImGui::Spacing();
+
+    if(!builtinPlacementMode){
+        ImGui::PushStyleColor(ImGuiCol_Button,{0.15f,0.55f,0.25f,1.0f});
+        if(ImGui::Button("Postaw wbudowany",ImVec2(-1,0))){
+            result.startBuiltinPlacement=true;
+            result.builtinFurnitureType=builtin_typeIdx;
+            result.builtinRotY=builtin_rotY;
+            result.builtinScale=1.0f;
+        }
+        ImGui::PopStyleColor();
+        ImGui::TextDisabled("Potem kliknij LPM w widoku");
+    } else {
+        ImGui::TextColored({0.2f,1.0f,0.5f,1.0f},
+            ">> LPM: %s",furnitureName((FurnitureType)builtin_typeIdx));
+        ImGui::TextDisabled("R = obrot 45 deg | ESC = anuluj");
+        ImGui::PushStyleColor(ImGuiCol_Button,{0.7f,0.15f,0.15f,1.0f});
+        if(ImGui::Button("Anuluj (ESC)##b",ImVec2(-1,0)))
+            result.cancelFurniturePlacement=true;
+        ImGui::PopStyleColor();
+    }
+
+    ImGui::Spacing();ImGui::Separator();ImGui::Spacing();
+
+    // ─── MODELE OBJ ───────────────────────────────────────────────
+    ImGui::TextColored({1.0f,0.85f,0.4f,1.0f},"Modele OBJ:");
+    ImGui::Spacing();
+
+    if(availableModels.empty()){
+        ImGui::TextColored({0.7f,0.7f,0.7f,1.0f},"Brak plikow .obj");
+        ImGui::TextWrapped("Umiec .obj w: assets/models/");
+    } else {
+        furniture_modelIdx=glm::clamp(furniture_modelIdx,0,(int)availableModels.size()-1);
+        float listH=(float)glm::min((int)availableModels.size()*22+6,110);
+        ImGui::BeginChild("##modlist",{-1,listH},true);
+        for(int i=0;i<(int)availableModels.size();++i){
+            bool sel=(furniture_modelIdx==i);
+            if(ImGui::Selectable(availableModels[i].c_str(),sel))
+                furniture_modelIdx=i;
+        }
+        ImGui::EndChild();
+        ImGui::Text("Obrot Y:"); ImGui::SameLine();
+        ImGui::SetNextItemWidth(80);
+        ImGui::SliderFloat("##frotY",&furniture_rotY,-180.0f,180.0f,"%.0f");
+        ImGui::Text("Skala:"); ImGui::SameLine();
+        ImGui::SetNextItemWidth(80);
+        ImGui::SliderFloat("##fscale",&furniture_scale,0.05f,5.0f,"%.2f");
+        ImGui::Spacing();
+        if(!furniturePlacementMode){
+            ImGui::PushStyleColor(ImGuiCol_Button,{0.2f,0.55f,0.2f,1.0f});
+            if(ImGui::Button("Postaw OBJ",ImVec2(-1,0))){
+                result.startFurniturePlacement=true;
+                result.furnitureModelIdx=furniture_modelIdx;
+                result.furnitureRotY=furniture_rotY;
+                result.furnitureScale=furniture_scale;
+            }
+            ImGui::PopStyleColor();
+            ImGui::TextDisabled("Potem kliknij LPM w widoku");
+        } else {
+            ImGui::TextColored({0.2f,1.0f,0.4f,1.0f},
+                ">> LPM: %s",availableModels[furniture_modelIdx].c_str());
+            ImGui::PushStyleColor(ImGuiCol_Button,{0.7f,0.15f,0.15f,1.0f});
+            if(ImGui::Button("Anuluj (ESC)##o",ImVec2(-1,0)))
+                result.cancelFurniturePlacement=true;
+            ImGui::PopStyleColor();
+        }
+    }
+
+    ImGui::Spacing();ImGui::Separator();ImGui::Spacing();
+
+    // ─── POSTAWIONE MEBLE ─────────────────────────────────────────
+    int nF=(int)furnitureLabels.size();
+    if(nF>0){
+        ImGui::TextDisabled("Postawione (%d) — kliknij aby zaznaczyc:",nF);
+        float lh=(float)std::min(nF*22+6,120);
+        ImGui::BeginChild("##flist",{0,lh},true);
+        for(int i=0;i<nF;++i){
+            bool isSel=(i==selectedFurnitureIdx);
+            char buf[128];
+            snprintf(buf,sizeof(buf),"[%d] %s###fi%d",i,furnitureLabels[i].c_str(),i);
+            if(ImGui::Selectable(buf,isSel))
+                result.clickedFurnitureIdx=i;
+            ImGui::SameLine();
+            char delbtn[24];snprintf(delbtn,sizeof(delbtn),"X##fd%d",i);
+            ImGui::PushStyleColor(ImGuiCol_Button,{0.7f,0.15f,0.15f,1.0f});
+            if(ImGui::SmallButton(delbtn)) result.deleteFurniture=i;
+            ImGui::PopStyleColor();
+        }
+        ImGui::EndChild();
+
+        // Panel zaznaczonego mebla
+        if(selectedFurnitureIdx>=0&&selectedFurnitureIdx<nF){
+            ImGui::Separator();
+            ImGui::TextColored({0.3f,1.0f,0.6f,1.0f},
+                "Zaznaczony: %s",furnitureLabels[selectedFurnitureIdx].c_str());
+            ImGui::Text("Pozycja: (%.2f, %.2f)",selectedFurniturePos.x,selectedFurniturePos.z);
+            float rotBuf=selectedFurnitureRotY;
+            ImGui::Text("Obrot Y:");ImGui::SameLine();
+            ImGui::SetNextItemWidth(110);
+            if(ImGui::SliderFloat("##serot",&rotBuf,0,360,"%.0f deg"))
+                result.newFurnitureRotY=rotBuf;
+            ImGui::Spacing();
+            if(!furnitureMoveMode){
+                ImGui::PushStyleColor(ImGuiCol_Button,{0.2f,0.4f,0.8f,1.0f});
+                if(ImGui::Button("Przesuń (kliknij nowe miejsce)",ImVec2(-1,0)))
+                    result.requestMoveFurniture=true;
+                ImGui::PopStyleColor();
+                if(ImGui::Button("Odznacz",ImVec2(-1,0)))
+                    result.clickedFurnitureIdx=-1;
+            } else {
+                ImGui::TextColored({0.2f,1.0f,0.5f,1.0f},">> Kliknij nowe miejsce...");
+                ImGui::TextDisabled("ESC = anuluj");
+                ImGui::PushStyleColor(ImGuiCol_Button,{0.7f,0.15f,0.15f,1.0f});
+                if(ImGui::Button("Anuluj przesuwanie##cncmv",ImVec2(-1,0)))
+                    result.cancelFurniturePlacement=true;
+                ImGui::PopStyleColor();
+            }
+        }
+    }
+
+    ImGui::EndTabItem();
+}
 
             ImGui::EndTabBar();
         }

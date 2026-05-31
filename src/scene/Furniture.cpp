@@ -1,4 +1,5 @@
 #include "Furniture.h"
+#include "rendering/Mesh.h"
 #include "rendering/OBJLoader.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
@@ -8,13 +9,13 @@ bool FurnitureManager::addItem(const std::string& modelFile,
                                 glm::vec3 pos, float rotY, float scl)
 {
     FurnitureItem item;
-    item.modelFile   = modelFile;
-    item.textureFile = textureFile;
-    item.position    = pos;
-    item.rotationY   = rotY;
-    item.scale       = scl;
+    item.modelFile    = modelFile;
+    item.textureFile  = textureFile;
+    item.position     = pos;
+    item.rotationY    = rotY;
+    item.scale        = scl;
+    item.isProcedural = false;
 
-    // Mesh — uzyj keszu
     auto meshIt = meshCache.find(modelFile);
     if (meshIt != meshCache.end()) {
         item.mesh = meshIt->second;
@@ -22,14 +23,13 @@ bool FurnitureManager::addItem(const std::string& modelFile,
         auto m = std::make_shared<Mesh>();
         std::string path = "assets/models/" + modelFile;
         if (!OBJLoader::load(path, *m)) {
-            std::cerr << "[Furniture] Blad ladowania modelu: " << path << "\n";
+            std::cerr << "[Furniture] Blad ladowania: " << path << "\n";
             return false;
         }
         meshCache[modelFile] = m;
         item.mesh = m;
     }
 
-    // Tekstura — opcjonalna
     if (!textureFile.empty()) {
         auto texIt = texCache.find(textureFile);
         if (texIt != texCache.end()) {
@@ -41,8 +41,7 @@ bool FurnitureManager::addItem(const std::string& modelFile,
                 texCache[textureFile] = t;
                 item.texture = t;
             } else {
-                std::cerr << "[Furniture] Brak tekstury: " << tpath
-                          << " — renderowanie kolorem\n";
+                std::cerr << "[Furniture] Brak tekstury: " << tpath << "\n";
                 item.texture = nullptr;
             }
         }
@@ -52,31 +51,47 @@ bool FurnitureManager::addItem(const std::string& modelFile,
     return true;
 }
 
+void FurnitureManager::addBuiltinItem(FurnitureType type,
+                                       glm::vec3 pos, float rotY, float scl)
+{
+    FurnitureItem item;
+    item.isProcedural    = true;
+    item.position        = pos;
+    item.rotationY       = rotY;
+    item.scale           = scl;
+    item.modelFile       = furnitureName(type);
+    item.proceduralParts = FurnitureLibrary::buildParts(type);
+    items.push_back(std::move(item));
+}
+
 void FurnitureManager::draw(Shader& shader) const
 {
     for (const auto& item : items) {
-        if (!item.mesh || !item.mesh->isUploaded()) continue;
-
-        // Model matrix
         glm::mat4 model = glm::mat4(1.0f);
         model = glm::translate(model, item.position);
-        model = glm::rotate(model,
-                            glm::radians(item.rotationY),
-                            glm::vec3(0, 1, 0));
+        model = glm::rotate(model, glm::radians(item.rotationY), glm::vec3(0,1,0));
         model = glm::scale(model, glm::vec3(item.scale));
-
         shader.setMat4("model", model);
 
-        if (item.texture && item.texture->isLoaded()) {
-            item.texture->bind(0);
-            shader.setInt("diffuseTexture", 0);
-            shader.setInt("useTexture", 1);
-        } else {
-            shader.setVec3("objectColor", glm::vec3(0.7f, 0.55f, 0.35f));
+        if (item.isProcedural) {
             shader.setInt("useTexture", 0);
+            for (const auto& part : item.proceduralParts) {
+                if (!part.mesh || !part.mesh->isUploaded()) continue;
+                shader.setVec3("objectColor", part.color);
+                part.mesh->draw();
+            }
+        } else {
+            if (!item.mesh || !item.mesh->isUploaded()) continue;
+            if (item.texture && item.texture->isLoaded()) {
+                item.texture->bind(0);
+                shader.setInt("diffuseTexture", 0);
+                shader.setInt("useTexture", 1);
+            } else {
+                shader.setVec3("objectColor", glm::vec3(0.7f,0.55f,0.35f));
+                shader.setInt("useTexture", 0);
+            }
+            item.mesh->draw();
         }
-
-        item.mesh->draw();
     }
 }
 

@@ -49,13 +49,20 @@ glm::vec2      iwCursor={0,0};
 std::vector<glm::vec2> iwPoints;
 bool wallsDirty=false;
 
-// Tryb stawiania mebla
 bool              furniturePlacementMode=false;
 int               furniturePlacingModelIdx=0;
 float             furniturePlacingRotY=0.0f;
 float             furniturePlacingScale=1.0f;
 
-// Lista dostepnych modeli OBJ
+bool          builtinPlacementMode=false;
+FurnitureType builtinPlacingType=FurnitureType::CHAIR;
+float         builtinPlacingRotY=0.0f;
+float         builtinPlacingScale=1.0f;
+
+// Faza 5
+int   selectedFurnitureIdx = -1;
+bool  furnitureMoveMode    = false;
+
 std::vector<std::string> availableModels;
 
 void scanModels() {
@@ -69,7 +76,6 @@ void scanModels() {
     }
 }
 
-// Znajdz teksture pasujaca do modelu (ta sama nazwa, rozne rozszerzenia)
 std::string findTexture(const std::string& modelFile) {
     std::string stem = modelFile.substr(0, modelFile.rfind('.'));
     for (auto& ext : {".png",".jpg",".jpeg",".bmp"}) {
@@ -79,8 +85,6 @@ std::string findTexture(const std::string& modelFile) {
     }
     return "";
 }
-
-// ── Cutouty ───────────────────────────────────────────────────────────
 
 std::vector<WallCutout> getCutoutsForOutlineWall(int wallIdx)
 {
@@ -116,8 +120,6 @@ void rebuildAllWalls()
     wallsDirty=false;
 }
 
-// ── Snap points ───────────────────────────────────────────────────────
-
 std::vector<glm::vec2> getSnapPoints()
 {
     std::vector<glm::vec2> pts;
@@ -137,8 +139,6 @@ glm::vec2 findNearest(glm::vec2 p,const std::vector<glm::vec2>& pts,float& outDi
     for(auto& s:pts){float d=glm::length(p-s);if(d<outDist){outDist=d;best=s;}}
     return best;
 }
-
-// ── Kolizje ───────────────────────────────────────────────────────────
 
 bool pointInPolygon(glm::vec2 p,const std::vector<glm::vec2>& poly)
 {
@@ -215,8 +215,6 @@ glm::vec2 resolveCollisions(glm::vec2 pos)
     }
     return pos;
 }
-
-// ── Ruch kursora IW ───────────────────────────────────────────────────
 
 static float raySegIntersect(glm::vec2 O,glm::vec2 D,glm::vec2 A,glm::vec2 B)
 {
@@ -308,8 +306,6 @@ glm::vec2 moveAlongWallWithHop(glm::vec2 pos,int wallIdx,float dist)
     return np;
 }
 
-// ── GL narzedzia ──────────────────────────────────────────────────────
-
 glm::vec2 screenToWorld(double sx,double sy)
 {
     float ndcX=(float)(2.0*sx/SCR_WIDTH)-1.0f;
@@ -339,8 +335,6 @@ static void deleteVAOVBO(unsigned int& vao,unsigned int& vbo)
     if(vbo){glDeleteBuffers(1,&vbo);vbo=0;}
 }
 
-// ── GL obiekty ────────────────────────────────────────────────────────
-
 unsigned int outlineLinesVAO=0,outlineLinesVBO=0;
 unsigned int outlinePointsVAO=0,outlinePointsVBO=0;
 unsigned int outlineFillVAO=0,outlineFillVBO=0;
@@ -358,8 +352,6 @@ unsigned int floorVAO=0,floorVBO=0,floorEBO=0,gridVAO=0;
 int gridCount=0;
 unsigned int previewQuadVAO=0,previewQuadVBO=0;
 int previewQuadCount=0;
-
-// ── GL funkcje ────────────────────────────────────────────────────────
 
 void buildPreviewQuad(glm::vec2 wA,glm::vec2 wB,
                       float offset,float width,
@@ -599,8 +591,6 @@ glm::vec2 getInnerWallSurfaceOffset(int iwIdx)
     return perp*(iw.thickness*0.5f);
 }
 
-// ── Callbacki ─────────────────────────────────────────────────────────
-
 void framebuffer_size_callback(GLFWwindow*,int w,int h){glViewport(0,0,w,h);}
 void scroll_callback(GLFWwindow*,double,double y){camera.processMouseScroll((float)y);}
 
@@ -627,9 +617,9 @@ void key_callback(GLFWwindow* window,int key,int,int action,int)
     bool wt=ImGui::GetIO().WantTextInput;
 
     if(key==GLFW_KEY_ESCAPE){
-        if(furniturePlacementMode){
-            furniturePlacementMode=false; return;
-        }
+        if(furniturePlacementMode){furniturePlacementMode=false;return;}
+        if(builtinPlacementMode){builtinPlacementMode=false;return;}
+        if(furnitureMoveMode){furnitureMoveMode=false;return;}
         if(iwState!=IWState::IDLE){
             iwState=IWState::IDLE;iwPoints.clear();
             deleteVAOVBO(snapHighlightVAO,snapHighlightVBO);
@@ -668,15 +658,16 @@ void key_callback(GLFWwindow* window,int key,int,int action,int)
                 iwPoints.pop_back();
             }
         }
-        // R — obroc mebel podczas stawiania
         if(key==GLFW_KEY_R&&furniturePlacementMode){
             furniturePlacingRotY+=45.0f;
             if(furniturePlacingRotY>=360.0f) furniturePlacingRotY-=360.0f;
         }
+        if(key==GLFW_KEY_R&&builtinPlacementMode){
+            builtinPlacingRotY+=45.0f;
+            if(builtinPlacingRotY>=360.0f) builtinPlacingRotY-=360.0f;
+        }
     }
 }
-
-// ── MAIN ──────────────────────────────────────────────────────────────
 
 int main(int argc,char* argv[])
 {
@@ -711,7 +702,6 @@ int main(int argc,char* argv[])
     Shader phongShader("shaders/phong.vert","shaders/phong.frag");
     Shader flatShader ("shaders/flat.vert","shaders/flat.frag");
 
-    // Inicjalne ustawienia uniformow textury
     phongShader.use();
     phongShader.setInt("diffuseTexture",0);
     phongShader.setInt("useTexture",0);
@@ -719,6 +709,7 @@ int main(int argc,char* argv[])
     buildFloor(30.0f);buildGrid(30.0f);
     scanModels();
     std::cout<<"[Models] Znaleziono: "<<availableModels.size()<<" plikow OBJ\n";
+    std::cout<<"[Furniture] Biblioteka wbudowana: "<<(int)FurnitureType::COUNT<<" typow\n";
 
     auto initDyn=[](unsigned int& vao,unsigned int& vbo,size_t n){
         glGenVertexArrays(1,&vao);glGenBuffers(1,&vbo);
@@ -804,13 +795,30 @@ int main(int argc,char* argv[])
             }
         }
 
+        // Buduj etykiety mebli
+        std::vector<std::string> furnitureLabels;
+        for(auto& item:furnitureManager.items) furnitureLabels.push_back(item.modelFile);
+
+        glm::vec3 selPos={0,0,0};
+        float selRotY=0.0f;
+        if(selectedFurnitureIdx>=0&&selectedFurnitureIdx<(int)furnitureManager.items.size()){
+            selPos=furnitureManager.items[selectedFurnitureIdx].position;
+            selRotY=furnitureManager.items[selectedFurnitureIdx].rotationY;
+        }
+
         PanelResult pr=panel.render(
             outline,camera.getMode(),snapC,
             (int)innerWalls.size(),(int)doors.size(),(int)roomWindows.size(),
             iwState,iwCursor,(int)iwPoints.size(),
             innerLens,iwOnWallIdx,iwOnWallLen,moveFlags,
-            availableModels,(int)furnitureManager.items.size(),
-            furniturePlacementMode);
+            availableModels,
+            furnitureLabels,
+            selectedFurnitureIdx,
+            selPos,
+            selRotY,
+            furniturePlacementMode,
+            builtinPlacementMode,
+            furnitureMoveMode);
 
         // ── IW logika ─────────────────────────────────────────────────
 
@@ -873,7 +881,7 @@ int main(int argc,char* argv[])
             pendingSpace=false;
         }
 
-        // ── Meble ─────────────────────────────────────────────────────
+        // ── Meble OBJ ─────────────────────────────────────────────────
 
         if(pr.startFurniturePlacement&&!availableModels.empty()){
             furniturePlacementMode    = true;
@@ -881,9 +889,39 @@ int main(int argc,char* argv[])
             furniturePlacingRotY      = pr.furnitureRotY;
             furniturePlacingScale     = pr.furnitureScale;
         }
-        if(pr.cancelFurniturePlacement) furniturePlacementMode=false;
+        if(pr.cancelFurniturePlacement){
+            furniturePlacementMode=false;
+            builtinPlacementMode=false;
+            furnitureMoveMode=false;
+        }
 
-        // Kliknij zeby postawic mebel
+        // ── Meble wbudowane ───────────────────────────────────────────
+
+        if(pr.startBuiltinPlacement){
+            builtinPlacementMode  = true;
+            builtinPlacingType    = (FurnitureType)pr.builtinFurnitureType;
+            builtinPlacingRotY    = pr.builtinRotY;
+            builtinPlacingScale   = pr.builtinScale;
+        }
+
+        // ── Faza 5 — selekcja i edycja ────────────────────────────────
+
+        // Selekcja z panelu
+        if(pr.clickedFurnitureIdx>=-1){
+            selectedFurnitureIdx=pr.clickedFurnitureIdx;
+            furnitureMoveMode=false;
+        }
+        // Przesuwanie z panelu
+        if(pr.requestMoveFurniture&&selectedFurnitureIdx>=0)
+            furnitureMoveMode=true;
+        // Edycja obrotu zaznaczonego
+        if(pr.newFurnitureRotY>-998.f
+           &&selectedFurnitureIdx>=0
+           &&selectedFurnitureIdx<(int)furnitureManager.items.size())
+            furnitureManager.items[selectedFurnitureIdx].rotationY=pr.newFurnitureRotY;
+
+        // ── Klikniecia mebli OBJ / wbudowanych ───────────────────────
+
         if(!ImGui::GetIO().WantCaptureMouse&&pendingLeftClick
            &&furniturePlacementMode
            &&camera.getMode()==CameraMode::TOP_DOWN
@@ -899,8 +937,51 @@ int main(int argc,char* argv[])
             pendingLeftClick=false;
         }
 
-        if(pr.deleteFurniture>=0&&pr.deleteFurniture<(int)furnitureManager.items.size())
+        if(!ImGui::GetIO().WantCaptureMouse&&pendingLeftClick
+           &&builtinPlacementMode
+           &&camera.getMode()==CameraMode::TOP_DOWN
+           &&panel.state==AppState::DESIGN_MODE){
+            glm::vec3 pos={snapC.x, furnitureMountHeight(builtinPlacingType), snapC.y};
+            furnitureManager.addBuiltinItem(builtinPlacingType,pos,builtinPlacingRotY,builtinPlacingScale);
+            builtinPlacementMode=false;
+            pendingLeftClick=false;
+        }
+
+        // Przesuniecie zaznaczonego mebla
+        if(furnitureMoveMode
+           &&selectedFurnitureIdx>=0
+           &&selectedFurnitureIdx<(int)furnitureManager.items.size()
+           &&pendingLeftClick&&!ImGui::GetIO().WantCaptureMouse
+           &&camera.getMode()==CameraMode::TOP_DOWN){
+            furnitureManager.items[selectedFurnitureIdx].position.x=snapC.x;
+            furnitureManager.items[selectedFurnitureIdx].position.z=snapC.y;
+            furnitureMoveMode=false;
+            pendingLeftClick=false;
+        }
+
+        // Selekcja kliknieciem w viewport
+        if(!furniturePlacementMode&&!builtinPlacementMode&&!furnitureMoveMode
+           &&pendingLeftClick&&!ImGui::GetIO().WantCaptureMouse
+           &&camera.getMode()==CameraMode::TOP_DOWN
+           &&panel.state==AppState::DESIGN_MODE){
+            float bestDist=0.9f; int bestIdx=-1;
+            for(int i=0;i<(int)furnitureManager.items.size();++i){
+                glm::vec2 fp(furnitureManager.items[i].position.x,
+                             furnitureManager.items[i].position.z);
+                float d=glm::length(snapC-fp);
+                if(d<bestDist){bestDist=d;bestIdx=i;}
+            }
+            if(bestIdx>=0){selectedFurnitureIdx=bestIdx;pendingLeftClick=false;}
+            else selectedFurnitureIdx=-1;
+        }
+
+        // Usuwanie mebla
+        if(pr.deleteFurniture>=0&&pr.deleteFurniture<(int)furnitureManager.items.size()){
             furnitureManager.items.erase(furnitureManager.items.begin()+pr.deleteFurniture);
+            if(selectedFurnitureIdx==pr.deleteFurniture) selectedFurnitureIdx=-1;
+            else if(selectedFurnitureIdx>pr.deleteFurniture) selectedFurnitureIdx--;
+            furnitureMoveMode=false;
+        }
 
         // ── Klikniecia obrysu ─────────────────────────────────────────
 
@@ -920,14 +1001,13 @@ int main(int argc,char* argv[])
         }
         pendingSpace=false;pendingEnter=false;
 
-        // ── Faza 2 ────────────────────────────────────────────────────
-
         if(pr.undoPoint){outline.removeLast();outlineGLDirty=true;}
         if(pr.clearOutline){
             outline.clear();walls.clear();innerWalls.clear();
             doors.clear();roomWindows.clear();furnitureManager.clear();
             iwState=IWState::IDLE;iwPoints.clear();
-            furniturePlacementMode=false;
+            furniturePlacementMode=false;builtinPlacementMode=false;furnitureMoveMode=false;
+            selectedFurnitureIdx=-1;
             deleteVAOVBO(snapHighlightVAO,snapHighlightVBO);
             deleteVAOVBO(iwLinesVAO,iwLinesVBO);
             panel.state=AppState::DRAWING_OUTLINE;outlineGLDirty=true;
@@ -944,7 +1024,8 @@ int main(int argc,char* argv[])
             outline.reopen();walls.clear();innerWalls.clear();
             doors.clear();roomWindows.clear();furnitureManager.clear();
             iwState=IWState::IDLE;iwPoints.clear();
-            furniturePlacementMode=false;
+            furniturePlacementMode=false;builtinPlacementMode=false;furnitureMoveMode=false;
+            selectedFurnitureIdx=-1;
             deleteVAOVBO(snapHighlightVAO,snapHighlightVBO);
             deleteVAOVBO(iwLinesVAO,iwLinesVBO);
             panel.state=AppState::DRAWING_OUTLINE;outlineGLDirty=true;
@@ -952,8 +1033,6 @@ int main(int argc,char* argv[])
             glfwSetInputMode(window,GLFW_CURSOR,GLFW_CURSOR_NORMAL);mouseCapured=false;
         }
         if(pr.floorSizeDirty){buildFloor(pr.floorSize);buildGrid(pr.floorSize);}
-
-        // ── Faza 3 ────────────────────────────────────────────────────
 
         if(pr.deleteInnerWall>=0&&pr.deleteInnerWall<(int)innerWalls.size()){
             innerWalls.erase(innerWalls.begin()+pr.deleteInnerWall);
@@ -977,8 +1056,7 @@ int main(int argc,char* argv[])
             wallsDirty=true;
         }
         if(pr.deleteDoor>=0&&pr.deleteDoor<(int)doors.size()){
-            doors.erase(doors.begin()+pr.deleteDoor);
-            wallsDirty=true;
+            doors.erase(doors.begin()+pr.deleteDoor);wallsDirty=true;
         }
 
         if(pr.placeWindow){
@@ -988,12 +1066,11 @@ int main(int argc,char* argv[])
             if(pr.win_isInner&&pr.win_wallIdx<(int)innerWalls.size())
                 surfOffset=getInnerWallSurfaceOffset(pr.win_wallIdx);
             RoomWindow rw;
-            rw.wallIndex   = pr.win_wallIdx;
-            rw.isInnerWall = pr.win_isInner;
+            rw.wallIndex=pr.win_wallIdx; rw.isInnerWall=pr.win_isInner;
             rw.offset=pr.win_offset; rw.width=pr.win_width;
             rw.height=pr.win_height; rw.sill=pr.win_sill;
             glm::vec2 dir=glm::normalize(wB-wA);
-            glm::vec2 wXA=wA+dir*pr.win_offset      +surfOffset;
+            glm::vec2 wXA=wA+dir*pr.win_offset+surfOffset;
             glm::vec2 wXB=wA+dir*(pr.win_offset+pr.win_width)+surfOffset;
             glm::vec2 gXA=wA+dir*pr.win_offset;
             glm::vec2 gXB=wA+dir*(pr.win_offset+pr.win_width);
@@ -1026,13 +1103,10 @@ int main(int argc,char* argv[])
             wallsDirty=true;
         }
         if(pr.deleteWindow>=0&&pr.deleteWindow<(int)roomWindows.size()){
-            roomWindows.erase(roomWindows.begin()+pr.deleteWindow);
-            wallsDirty=true;
+            roomWindows.erase(roomWindows.begin()+pr.deleteWindow);wallsDirty=true;
         }
 
         if(wallsDirty&&!walls.empty()) rebuildAllWalls();
-
-        // ── Preview drzwi/okna ────────────────────────────────────────
 
         bool showDoorPreview=(panel.state==AppState::DESIGN_MODE
             &&panel.activeTool==Panel::DesignTool::DOOR
@@ -1044,12 +1118,12 @@ int main(int argc,char* argv[])
             &&iwState==IWState::IDLE);
 
         if(showDoorPreview||showWindowPreview){
-            bool  pIsInner = showDoorPreview ? panel.door_isInner : panel.win_isInner;
-            int   pWallIdx = showDoorPreview ? panel.door_wallIdx : panel.win_wallIdx;
-            float pOffset  = showDoorPreview ? panel.door_offset  : panel.win_offset;
-            float pWidth   = showDoorPreview ? panel.door_width   : panel.win_width;
-            float pYBottom = showDoorPreview ? 0.0f               : panel.win_sill;
-            float pYTop    = showDoorPreview ? panel.door_height  : panel.win_sill+panel.win_height;
+            bool  pIsInner = showDoorPreview?panel.door_isInner:panel.win_isInner;
+            int   pWallIdx = showDoorPreview?panel.door_wallIdx:panel.win_wallIdx;
+            float pOffset  = showDoorPreview?panel.door_offset:panel.win_offset;
+            float pWidth   = showDoorPreview?panel.door_width:panel.win_width;
+            float pYBottom = showDoorPreview?0.0f:panel.win_sill;
+            float pYTop    = showDoorPreview?panel.door_height:panel.win_sill+panel.win_height;
             glm::vec2 wA={0,0},wB={1,0},surfOff={0,0};
             bool validWall=false;
             if(!pIsInner&&pWallIdx<(int)outline.points.size()){
@@ -1100,7 +1174,7 @@ int main(int argc,char* argv[])
             flatShader.setMat4("projection",proj);
         };
 
-        // 1. Podloga
+        // Podloga
         phongShader.use();
         phongShader.setMat4("view",view);phongShader.setMat4("projection",proj);
         phongShader.setVec3("viewPos",camera.position);
@@ -1112,13 +1186,13 @@ int main(int argc,char* argv[])
         setPhong(I,{0.55f,0.50f,0.45f});
         glBindVertexArray(floorVAO);glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,0);
 
-        // 2. Siatka
+        // Siatka
         flatShader.use();setFlatMVP();
         float gc=(camera.getMode()==CameraMode::TOP_DOWN)?0.45f:0.25f;
         flatShader.setVec4("color",{gc,gc,gc,1});
         glBindVertexArray(gridVAO);glDrawArrays(GL_LINES,0,gridCount);
 
-        // 3. Sciany zewnetrzne
+        // Sciany zewnetrzne
         if(!walls.empty()){
             phongShader.use();
             phongShader.setMat4("view",view);phongShader.setMat4("projection",proj);
@@ -1127,7 +1201,7 @@ int main(int argc,char* argv[])
             for(auto& w:walls) w.draw();
         }
 
-        // 4. Sciany wewnetrzne
+        // Sciany wewnetrzne
         if(!innerWalls.empty()){
             phongShader.use();
             phongShader.setMat4("view",view);phongShader.setMat4("projection",proj);
@@ -1136,7 +1210,7 @@ int main(int argc,char* argv[])
             for(auto& iw:innerWalls) iw.draw();
         }
 
-        // 5. Drzwi
+        // Drzwi
         if(!doors.empty()){
             flatShader.use();setFlatMVP();
             flatShader.setVec4("color",{0.4f,0.25f,0.1f,1.0f});
@@ -1150,7 +1224,7 @@ int main(int argc,char* argv[])
             for(auto& d:doors) d.drawPanel();
         }
 
-        // 6. Okna
+        // Okna
         if(!roomWindows.empty()){
             flatShader.use();setFlatMVP();
             glLineWidth(2.0f);
@@ -1163,7 +1237,7 @@ int main(int argc,char* argv[])
             glDepthMask(GL_TRUE);
         }
 
-        // 6b. Preview drzwi/okna
+        // Preview drzwi/okna
         if(previewQuadVAO&&previewQuadCount>0){
             flatShader.use();setFlatMVP();
             glLineWidth(3.0f);
@@ -1175,7 +1249,7 @@ int main(int argc,char* argv[])
             glLineWidth(1.0f);
         }
 
-        // 7. Meble (z teksturami)
+        // Meble
         if(!furnitureManager.items.empty()){
             phongShader.use();
             phongShader.setMat4("view",view);
@@ -1189,7 +1263,45 @@ int main(int argc,char* argv[])
             furnitureManager.draw(phongShader);
         }
 
-        // 8. Obrys
+        // Wskaznik zaznaczonego mebla (zolty krzyzyk)
+        if(selectedFurnitureIdx>=0&&selectedFurnitureIdx<(int)furnitureManager.items.size()){
+            flatShader.use();setFlatMVP();
+            float sx=furnitureManager.items[selectedFurnitureIdx].position.x;
+            float sz=furnitureManager.items[selectedFurnitureIdx].position.z;
+            float s=0.55f;
+            float sv[]={sx-s,0.08f,sz, sx+s,0.08f,sz, sx,0.08f,sz-s, sx,0.08f,sz+s};
+            unsigned int tv,tb;
+            glGenVertexArrays(1,&tv);glGenBuffers(1,&tb);
+            glBindVertexArray(tv);glBindBuffer(GL_ARRAY_BUFFER,tb);
+            glBufferData(GL_ARRAY_BUFFER,sizeof(sv),sv,GL_DYNAMIC_DRAW);
+            glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,3*sizeof(float),(void*)0);
+            glEnableVertexAttribArray(0);
+            glLineWidth(3.0f);
+            flatShader.setVec4("color",{1.0f,1.0f,0.0f,1.0f});
+            glDrawArrays(GL_LINES,0,4);
+            glLineWidth(1.0f);
+            glBindVertexArray(0);
+            glDeleteVertexArrays(1,&tv);glDeleteBuffers(1,&tb);
+
+            // Wskaznik trybu przesuwania (zielony krzyzyk na kursorze)
+            if(furnitureMoveMode&&camera.getMode()==CameraMode::TOP_DOWN){
+                float cx=snapC.x,cz=snapC.y;
+                float mv[]={cx-s,0.09f,cz, cx+s,0.09f,cz, cx,0.09f,cz-s, cx,0.09f,cz+s};
+                glGenVertexArrays(1,&tv);glGenBuffers(1,&tb);
+                glBindVertexArray(tv);glBindBuffer(GL_ARRAY_BUFFER,tb);
+                glBufferData(GL_ARRAY_BUFFER,sizeof(mv),mv,GL_DYNAMIC_DRAW);
+                glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,3*sizeof(float),(void*)0);
+                glEnableVertexAttribArray(0);
+                glLineWidth(2.0f);
+                flatShader.setVec4("color",{0.2f,1.0f,0.5f,0.9f});
+                glDrawArrays(GL_LINES,0,4);
+                glLineWidth(1.0f);
+                glBindVertexArray(0);
+                glDeleteVertexArrays(1,&tv);glDeleteBuffers(1,&tb);
+            }
+        }
+
+        // Obrys
         flatShader.use();setFlatMVP();
         if(outlineFillCount>0){
             flatShader.setVec4("color",{0.3f,0.6f,1.0f,0.12f});
@@ -1204,7 +1316,6 @@ int main(int argc,char* argv[])
             glBindVertexArray(outlinePointsVAO);glDrawArrays(GL_POINTS,0,outlinePointsCount);glPointSize(1.0f);
         }
 
-        // 9. Podglady obrysu
         if(panel.state==AppState::DRAWING_OUTLINE&&!outline.points.empty()&&!outline.closed){
             flatShader.setVec4("color",{0.7f,0.7f,0.7f,0.4f});
             glBindVertexArray(previewLineVAO);glDrawArrays(GL_LINES,0,2);
@@ -1222,7 +1333,6 @@ int main(int argc,char* argv[])
             glBindVertexArray(snapDotVAO);glDrawArrays(GL_POINTS,0,1);glPointSize(1.0f);
         }
 
-        // 10. IW podglady
         if(iwState==IWState::SELECT_ORIGIN&&snapHighlightVAO){
             glPointSize(16.0f);flatShader.setVec4("color",{1.0f,1.0f,0.0f,1.0f});
             glBindVertexArray(snapHighlightVAO);
@@ -1254,7 +1364,7 @@ int main(int argc,char* argv[])
             glBindVertexArray(iwCursorVAO);glDrawArrays(GL_LINES,0,8);glLineWidth(1.0f);
         }
 
-        // 11. Hint stawiania mebla
+        // Overlay: OBJ placement
         if(furniturePlacementMode&&camera.getMode()==CameraMode::TOP_DOWN){
             ImGui::SetNextWindowPos({SCR_WIDTH/2-150.0f,10},ImGuiCond_Always);
             ImGui::SetNextWindowSize({300,60},ImGuiCond_Always);
@@ -1264,9 +1374,36 @@ int main(int argc,char* argv[])
             ImGui::Begin("##fhint",nullptr,hf);
             if(!availableModels.empty()&&furniturePlacingModelIdx<(int)availableModels.size())
                 ImGui::TextColored({0.2f,1.0f,0.4f,1.0f},
-                    "Kliknij LPM aby postawic: %s",
-                    availableModels[furniturePlacingModelIdx].c_str());
+                    "Kliknij LPM: %s",availableModels[furniturePlacingModelIdx].c_str());
             ImGui::TextDisabled("R = obrot 45 deg | ESC = anuluj");
+            ImGui::End();
+        }
+
+        // Overlay: builtin placement
+        if(builtinPlacementMode&&camera.getMode()==CameraMode::TOP_DOWN){
+            float yPos=furniturePlacementMode?80.0f:10.0f;
+            ImGui::SetNextWindowPos({SCR_WIDTH/2-150.0f,yPos},ImGuiCond_Always);
+            ImGui::SetNextWindowSize({300,60},ImGuiCond_Always);
+            ImGuiWindowFlags hf=ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoMove|
+                ImGuiWindowFlags_NoCollapse|ImGuiWindowFlags_NoTitleBar|
+                ImGuiWindowFlags_NoFocusOnAppearing;
+            ImGui::Begin("##bhint",nullptr,hf);
+            ImGui::TextColored({0.2f,1.0f,0.8f,1.0f},
+                "Kliknij LPM: %s",furnitureName(builtinPlacingType));
+            ImGui::TextDisabled("R = obrot 45 deg | ESC = anuluj");
+            ImGui::End();
+        }
+
+        // Overlay: move mode
+        if(furnitureMoveMode&&camera.getMode()==CameraMode::TOP_DOWN){
+            ImGui::SetNextWindowPos({SCR_WIDTH/2-150.0f,10},ImGuiCond_Always);
+            ImGui::SetNextWindowSize({300,50},ImGuiCond_Always);
+            ImGuiWindowFlags hf=ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoMove|
+                ImGuiWindowFlags_NoCollapse|ImGuiWindowFlags_NoTitleBar|
+                ImGuiWindowFlags_NoFocusOnAppearing;
+            ImGui::Begin("##mvhint",nullptr,hf);
+            ImGui::TextColored({0.2f,1.0f,0.5f,1.0f},"Kliknij nowe miejsce dla mebla");
+            ImGui::TextDisabled("ESC = anuluj");
             ImGui::End();
         }
 

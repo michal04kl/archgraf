@@ -13,6 +13,7 @@ add_executable(${PROJECT_NAME}
     src/scene/Door.cpp
     src/scene/RoomWindow.cpp
     src/scene/Furniture.cpp
+    src/scene/FurnitureLibrary.cpp
     src/rendering/Texture.cpp
     src/rendering/Mesh.cpp
     src/rendering/OBJLoader.cpp
